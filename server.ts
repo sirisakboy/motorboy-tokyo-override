@@ -1,65 +1,54 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { readFileSync, existsSync } from "fs";
+import { existsSync } from "fs";
+import https from "https";
 
 // tgpt WASM integration for cloud deployment
-interface TgptWasmModule {
-  exports: {
-    _start: () => void;
-    memory: WebAssembly.Memory;
-  };
+// Uses Pollinations free API (no API key required)
+
+function callPollinationsAI(symptoms: string, bikeModel: string, ecuCode: string): Promise<string> {
+  const prompt = `You are an expert anime-style motorcycle tuner and lead mechanic from "Tokyo Override". Diagnose the following vehicle issue:
+- Bike Model: ${bikeModel || "Generic Sports Bike"}
+- Reported Symptoms: ${symptoms || "Engine turns but won't start"}
+- OBD/ECU Fault Code (DTC): ${ecuCode || "None"}
+
+Provide diagnostic in markdown with: CYBER-SCAN DIAGNOSIS, THE UNDERGROUND TRUTH, STEP-BY-STEP REPAIR PROTOCOL, RECOMMENDED CYBERPARTS.`;
+
+  return new Promise((resolve, reject) => {
+    // Encode prompt for URL
+    const encodedPrompt = encodeURIComponent(prompt);
+    
+    const options = {
+      hostname: "text.pollinations.ai",
+      path: `/prompt/${encodedPrompt}`,
+      method: "GET",
+      timeout: 15000
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => data += chunk);
+      res.on("end", () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data);
+        } else {
+          reject(new Error(`API error: ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.on("timeout", () => reject(new Error("API timeout")));
+    req.end();
+  });
 }
 
-// Cloud-friendly AI diagnostics using tgpt WASM
-class TgptAI {
-  private ready: boolean = false;
-  
-  constructor() {
-    this.init();
-  }
-  
-  private async init() {
-    try {
-      // Check if WASM module exists in public folder
-      const wasmPath = path.join(process.cwd(), "public", "tgpt.wasm");
-      if (existsSync(wasmPath)) {
-        this.ready = true;
-        console.log("[MotorBoy] tgpt.wasm module loaded - AI Diagnostics ready");
-      } else {
-        console.warn("[MotorBoy] tgpt.wasm not found - AI will use mock mode");
-      }
-    } catch (e) {
-      console.warn("[MotorBoy] WASM init failed:", e);
-    }
-  }
-  
-  async diagnose(symptoms: string, bikeModel: string, ecuCode: string): Promise<string> {
-    if (!this.ready) {
-      // Fallback mock response
-      return `[OFFLINE DIAGNOSTIC MODE - tgpt.wasm]
-Bike: ${bikeModel || "Unknown"}
-Symptoms: ${symptoms || "None reported"}
-ECU Code: ${ecuCode || "None"}
+// Fallback diagnostic when AI unavailable
+function generateOfflineDiagnostic(symptoms: string, bikeModel: string, ecuCode: string): string {
+  return `## CYBER-SCAN DIAGNOSIS // Confidence: 87%
 
-Suggested Check:
-1. Verify battery voltage (should be 12.4V+).
-2. Inspect fuel injector and spark plug condition.
-3. Clean the idle air control valve (IACV).`;
-    }
-    
-    // For cloud deployment without native WASM runtime,
-    // we'll use a mock response but indicate tgpt integration
-    // Full WASM integration would require @wasmer/wasi or similar
-    return this.generateMockDiagnostic(symptoms, bikeModel, ecuCode);
-  }
-  
-  private generateMockDiagnostic(symptoms: string, bikeModel: string, ecuCode: string): string {
-    const symptomText = symptoms || "Engine turns but won't start";
-    
-    return `## CYBER-SCAN DIAGNOSIS // Confidence: 87%
-
-**Primary Fault**: ${symptomText.includes("start") ? "Fuel injection system anomaly" : "ECU mapping irregularities"} detected in ${bikeModel || "motorcycle"} chassis.
+**Primary Fault**: ${symptoms?.includes("start") ? "Fuel injection system anomaly" : "ECU mapping irregularities"} detected in ${bikeModel || "motorcycle"} chassis.
 
 ---
 
@@ -93,11 +82,8 @@ Yo, listen up pilot! Your ride's spitting sputters because the PGM-FI matrix ain
 
 ---
 
-**Status**: tgpt.wasm module active // Awaiting full WASM runtime integration`;
-  }
+**Status**: OFFLINE FALLBACK MODE (Pollinations API unavailable)`;
 }
-
-const ai = new TgptAI();
 
 async function startServer() {
   const app = express();
@@ -110,12 +96,60 @@ async function startServer() {
     res.json({ status: "ok", aiEnabled: true, aiType: "tgpt-wasm" });
   });
 
+  // API: tgpt proxy endpoint for WASM bridge
+  app.get("/api/tgpt-proxy", async (req, res) => {
+    const prompt = req.query.prompt as string;
+    if (!prompt) {
+      return res.status(400).json({ error: "prompt query parameter required" });
+    }
+    
+    try {
+      // Use Pollinations API as backend
+      const encodedPrompt = encodeURIComponent(prompt);
+      
+      return new Promise<void>((resolve, reject) => {
+        const options = {
+          hostname: "text.pollinations.ai",
+          path: `/prompt/${encodedPrompt}`,
+          method: "GET",
+          timeout: 15000
+        };
+
+        const req = https.request(options, (apiRes) => {
+          let data = "";
+          apiRes.on("data", (chunk) => data += chunk);
+          apiRes.on("end", () => {
+            res.setHeader("Content-Type", "text/plain");
+            res.send(data);
+          });
+        });
+
+        req.on("error", () => {
+          res.send(`[AI] ${prompt.substring(0, 100)}...`);
+        });
+        req.on("timeout", () => {
+          req.destroy();
+          res.send(`[Timeout] ${prompt.substring(0, 50)}...`);
+        });
+        req.end();
+      });
+    } catch (error) {
+      res.send(`[Error] AI service unavailable`);
+    }
+  });
+
   // API: tgpt-based Diagnostics
   app.post("/api/gemini/diagnose", async (req, res) => {
     try {
       const { bikeModel, symptoms, ecuCode } = req.body;
       
-      const diagnostic = await ai.diagnose(symptoms, bikeModel, ecuCode);
+      let diagnostic;
+      try {
+        diagnostic = await callPollinationsAI(symptoms, bikeModel, ecuCode);
+      } catch {
+        // Fallback to offline mode
+        diagnostic = generateOfflineDiagnostic(symptoms, bikeModel, ecuCode);
+      }
 
       res.json({
         success: true,
