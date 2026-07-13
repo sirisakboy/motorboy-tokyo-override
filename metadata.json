@@ -1,0 +1,6 @@
+{
+  "name": "MotorBoy Tokyo Override",
+  "description": "Tokyo Override inspired motorcycle tuner, digital dyno dashboard, AI diagnostics HUD, and manga parts blueprint engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
