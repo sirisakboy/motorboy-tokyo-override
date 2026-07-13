@@ -29,12 +29,13 @@ import { MotorcycleModel, SparePart } from "./types";
 import DynoStage from "./components/DynoStage";
 import CyberDiagnostics from "./components/CyberDiagnostics";
 import BlueprintCatalog from "./components/BlueprintCatalog";
+import AIConsole from "./components/console/AIConsole";
 
 export default function App() {
   // Application Global States
   const [activeBike, setActiveBike] = useState<MotorcycleModel>(MOTORCYCLE_MODELS[0]);
   const [installedUpgrades, setInstalledUpgrades] = useState<SparePart[]>([]);
-  const [activeTab, setActiveTab] = useState<"dyno" | "diagnose" | "blueprint" | "garage">("dyno");
+  const [activeTab, setActiveTab] = useState<"dyno" | "diagnose" | "blueprint" | "garage" | "console">("dyno");
   
   // Dyno Run Logs
   const [dynoHistory, setDynoHistory] = useState<Array<{
@@ -385,6 +386,19 @@ export default function App() {
             >
               <History className="w-4 h-4 shrink-0" />
               <span>[04] Tuner Logs Ledger</span>
+            </button>
+
+            {/* AI CONSOLE TAB */}
+            <button
+              onClick={() => setActiveTab("console")}
+              className={`px-4 py-2.5 rounded font-display font-black tracking-wider text-xs uppercase flex items-center gap-2 transition-all border ${
+                activeTab === "console"
+                  ? "bg-cyber-orange border-orange-500 text-black shadow-[0_0_12px_rgba(255,94,0,0.3)] font-bold scale-[1.01]"
+                  : "bg-cyber-darker border-cyber-gray text-slate-400 hover:text-white hover:bg-cyber-gray/30"
+              }`}
+            >
+              <Terminal className="w-4 h-4 shrink-0" />
+              <span>[05] AI Cyber Console</span>
             </button>
 
           </div>
@@ -878,6 +892,13 @@ export default function App() {
                   )}
                 </div>
 
+              </div>
+            )}
+
+            {/* AI CONSOLE TAB */}
+            {activeTab === "console" && (
+              <div className="animate-fade-in">
+                <AIConsole />
               </div>
             )}
 
